@@ -21,7 +21,7 @@ jobs:
         cat subs.txt | ~/go/bin/httpx -silent > live.txt
 
     - name: Upload
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: results
         path: |
