@@ -1,0 +1,69 @@
+name: Pro Recon Pipeline
+
+on:
+  workflow_dispatch:
+
+jobs:
+  recon:
+    runs-on: ubuntu-latest
+
+    env:
+      TARGET: example.com
+
+    steps:
+
+    - name: Install Tools
+      run: |
+        sudo apt update
+        sudo apt install -y golang git python3-pip
+
+        go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+        go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+        go install github.com/projectdiscovery/katana/cmd/katana@latest
+        go install github.com/lc/gau/v2/cmd/gau@latest
+        go install github.com/tomnomnom/waybackurls@latest
+
+        pip3 install uro
+
+    - name: Subdomain Discovery
+      run: |
+        ~/go/bin/subfinder -d $TARGET -all -silent > subs.txt
+        cat subs.txt | sort -u > all_subs.txt
+
+    - name: Live Hosts
+      run: |
+        cat all_subs.txt | ~/go/bin/httpx -silent > live.txt
+
+    - name: URL Gathering
+      run: |
+        cat live.txt | gau > gau.txt
+        cat live.txt | waybackurls > wayback.txt
+        cat gau.txt wayback.txt | uro > urls.txt
+
+    - name: JS Crawling
+      run: |
+        ~/go/bin/katana -list live.txt -silent -o crawl.txt
+
+    - name: Extract JS Files
+      run: |
+        cat urls.txt crawl.txt | grep ".js" | sort -u > js_files.txt
+
+    - name: Extract Hidden Endpoints
+      run: |
+        cat js_files.txt | while read url; do
+          curl -s $url | grep -Eo "(https?:\/\/[^\"']+|\/[a-zA-Z0-9_\-\/]+)" >> endpoints.txt
+        done
+
+        sort -u endpoints.txt > final_endpoints.txt || true
+
+    - name: Upload Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: recon-results
+        path: |
+          subs.txt
+          live.txt
+          urls.txt
+          crawl.txt
+          js_files.txt
+          final_endpoints.txt
