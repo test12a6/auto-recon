@@ -1,4 +1,4 @@
-name: Ultimate AI Recon
+name: Pro Recon Pipeline
 
 on:
   workflow_dispatch:
@@ -8,33 +8,31 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      TARGET: hilton.com
+      TARGET: example.com
 
     steps:
 
     - name: Install Tools
       run: |
         sudo apt update
-        sudo apt install -y golang git python3-pip curl
+        sudo apt install -y golang git python3-pip
 
         go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
         go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-        go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
-        go install github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
+        go install github.com/projectdiscovery/katana/cmd/katana@latest
         go install github.com/lc/gau/v2/cmd/gau@latest
         go install github.com/tomnomnom/waybackurls@latest
-        go install github.com/projectdiscovery/katana/cmd/katana@latest
 
-        pip3 install uro qsreplace
+        pip3 install uro
 
-    - name: Subdomain Recon
+    - name: Subdomain Discovery
       run: |
         ~/go/bin/subfinder -d $TARGET -all -silent > subs.txt
-        cat subs.txt | ~/go/bin/httpx -silent > live.txt
+        cat subs.txt | sort -u > all_subs.txt
 
-    - name: Port Scan
+    - name: Live Hosts
       run: |
-        ~/go/bin/naabu -l live.txt -silent -o ports.txt
+        cat all_subs.txt | ~/go/bin/httpx -silent > live.txt
 
     - name: URL Gathering
       run: |
@@ -46,28 +44,17 @@ jobs:
       run: |
         ~/go/bin/katana -list live.txt -silent -o crawl.txt
 
-    - name: Param Discovery
+    - name: Extract JS Files
       run: |
-        cat urls.txt crawl.txt | grep "=" | sort -u > params.txt
+        cat urls.txt crawl.txt | grep ".js" | sort -u > js_files.txt
 
-    - name: XSS Reflection Check
+    - name: Extract Hidden Endpoints
       run: |
-        cat params.txt | qsreplace 'xsstest123' | \
-        ~/go/bin/httpx -silent -mr 'xsstest123' -o xss_reflection.txt || true
+        cat js_files.txt | while read url; do
+          curl -s $url | grep -Eo "(https?:\/\/[^\"']+|\/[a-zA-Z0-9_\-\/]+)" >> endpoints.txt
+        done
 
-    - name: Open Redirect Check
-      run: |
-        cat params.txt | qsreplace 'https://evil.com' | \
-        ~/go/bin/httpx -location -silent -o redirect.txt || true
-
-    - name: LFI Discovery
-      run: |
-        cat params.txt | qsreplace '/etc/passwd' | \
-        ~/go/bin/httpx -mr 'root:x' -silent -o lfi.txt || true
-
-    - name: Nuclei Scan
-      run: |
-        ~/go/bin/nuclei -l live.txt -severity low,medium,high,critical -o nuclei.txt
+        sort -u endpoints.txt > final_endpoints.txt || true
 
     - name: Upload Results
       uses: actions/upload-artifact@v4
@@ -78,9 +65,5 @@ jobs:
           live.txt
           urls.txt
           crawl.txt
-          params.txt
-          ports.txt
-          nuclei.txt
-          xss_reflection.txt
-          redirect.txt
-          lfi.txt
+          js_files.txt
+          final_endpoints.txt
